@@ -9,10 +9,11 @@ https://github.com/p-hofmann/PyVoxelizer
 """
 
 import argparse
+from itertools import chain
+import logging, logging.handlers
 import math
-import matplotlib.pyplot as plt
-from mpl_toolkits.mplot3d import axes3d
 import numpy as np
+import os
 import pandas as pd
 
 from mesh import get_scale_and_shift, scale_and_shift_triangle
@@ -225,33 +226,107 @@ def voxelize(file_path, resolution):
         yield x-center[0], y-center[1], z-center[2]
 
 
+def get_bbox(file):
+    mesh_reader = MeshReader()
+    mesh_reader.read(file)
+    list_of_triangles = list(mesh_reader.get_facets())
+    xs = np.array(list(chain.from_iterable(list_of_triangles)))[:,0]
+    ys = np.array(list(chain.from_iterable(list_of_triangles)))[:,1]
+    zs = np.array(list(chain.from_iterable(list_of_triangles)))[:,2]
+    bbox = max(max(xs) - min(xs), max(ys) - min(ys), max(zs) - min(zs))
+
+    return bbox
+
+
+def save_image(file_name, voxels, L):
+    from matplotlib.pyplot import figure, close
+    from mpl_toolkits.mplot3d import axes3d
+
+    os.makedirs('images', exist_ok=True)
+    os.makedirs('binaries', exist_ok=True)
+
+    pf = pd.DataFrame(voxels, columns=['x', 'y', 'z'])
+    pf['distance'] = np.sqrt(pf['x']**2 + pf['y']**2 + pf['z']**2)
+    fig = figure(figsize=(12, 9))
+    ax = fig.add_subplot(111, projection='3d')
+    ax.scatter3D(pf['x'], pf['y'], pf['z'], c=pf['distance'], cmap='viridis')
+
+    L_str = f'{L:0.2f}'.replace(".", "_")
+    name = f'{file.split(".")[0]}_L-{L_str}'
+    fig.savefig(os.path.join('images', name + '.png'))
+    close(fig)
+    np.save(os.path.join('binaries', name + '.npy'), voxels)
+
+
+def setup_logger():
+    """Log to file and to console errors and warnings"""
+    os.makedirs('logs', exist_ok=True)
+
+    log_formatter = logging.Formatter(
+        '%(asctime)s %(levelname)-8s %(message)s')
+
+    log_file_name = 'errors.txt'
+
+    file_handler = logging.handlers.RotatingFileHandler(
+        filename=os.path.join(
+            'logs',
+            log_file_name),
+        maxBytes=8388608,
+        backupCount=30)
+    file_handler.setFormatter(log_formatter)
+    file_handler.setLevel(logging.INFO)
+    file_handler.doRollover()
+
+    console_handler = logging.StreamHandler()
+    logging.basicConfig(
+        level=logging.NOTSET,
+        handlers=[
+            console_handler,
+            file_handler])
+
+
 if __name__ == '__main__':
+    setup_logger()
     parser = argparse.ArgumentParser(
             description='''Converts obj file to voxels.
                            Saves a numpy binary and a png.''')
     parser.add_argument(
-            '--obj',
-            help='OBJ filename')
+            '--folder',
+            help='folder with OBJ files')
     parser.add_argument(
-            '--res',
-            type=int,
-            help='Resolution - number of voxels along the longest axis')
+            '--img',
+            action='store_true',
+            help='Use --img to export image via matplotlib')
     args = parser.parse_args()
 
-    voxels = np.empty([0, 3])
-    for x, y, z in voxelize(args.obj, args.res):
-        voxels = np.append(voxels, [[x, y, z]], axis=0)
+    os.makedirs('boxCounts', exist_ok=True)
+    files = [file for file in os.listdir(args.folder) if file.endswith('.obj')]
 
-    print('{}: res={} voxels={}'.format(args.obj, args.res, len(voxels)))
+    master_df = pd.DataFrame(columns=['file', 'res', 'L', 'N'])
+    for file in files:
+        df = pd.DataFrame(columns=['file', 'res', 'L', 'N'])
+        file_path = os.path.join(args.folder, file)
+        bbox = get_bbox(file_path)
 
-    df = pd.DataFrame(voxels, columns=['x', 'y', 'z'])
-    df['distance'] = np.sqrt(df['x']**2 + df['y']**2 + df['z']**2)
-    fig = plt.figure(figsize=(12, 9))
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter3D(df['x'], df['y'], df['z'], c=df['distance'], cmap='viridis')
+        for res in np.geomspace(10, bbox/2, 30):
+            L = bbox/res
+            voxels = np.empty([0, 3])
+            for x, y, z in voxelize(file_path, res):
+                voxels = np.append(voxels, [[x, y, z]], axis=0)
 
-    fig.savefig(args.obj.split('.')[0] + '_res' + str(args.res) + '.png')
+            logging.info(
+                    f'{file:20} | L={L:8.2f} | N={len(voxels):8.0f}')
 
-    np.save(
-        args.obj.split('.')[0] + '_res' + str(args.res) + '.npy',
-        voxels)
+            df.loc[len(df)] = {
+                    'file': file,
+                    'res': res,
+                    'L': bbox/res,
+                    'N': len(voxels)}
+            if args.img:
+                save_image(file, voxels, L)
+
+        df.to_csv(os.path.join(
+                'boxCounts', f'{file.split(".")[0]}_boxCounts.csv'))
+        master_df = master_df.append(df)
+
+    master_df.to_csv('all_boxCounts.csv', index=False)
