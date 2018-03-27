@@ -238,24 +238,10 @@ def get_bbox(file):
     return bbox
 
 
-def save_image(file_name, voxels, L):
-    from matplotlib.pyplot import figure, close
-    from mpl_toolkits.mplot3d import axes3d
-
-    os.makedirs('images', exist_ok=True)
-    os.makedirs('binaries', exist_ok=True)
-
-    pf = pd.DataFrame(voxels, columns=['x', 'y', 'z'])
-    pf['distance'] = np.sqrt(pf['x']**2 + pf['y']**2 + pf['z']**2)
-    fig = figure(figsize=(12, 9))
-    ax = fig.add_subplot(111, projection='3d')
-    ax.scatter3D(pf['x'], pf['y'], pf['z'], c=pf['distance'], cmap='viridis')
-
+def save_npy(file, folder_name, voxels, L):
     L_str = f'{L:0.2f}'.replace(".", "_")
     name = f'{file.split(".")[0]}_L-{L_str}'
-    fig.savefig(os.path.join('images', name + '.png'))
-    close(fig)
-    np.save(os.path.join('binaries', name + '.npy'), voxels)
+    np.save(os.path.join('binaries', folder_name, name + '.npy'), voxels)
 
 
 def setup_logger():
@@ -294,12 +280,16 @@ if __name__ == '__main__':
             '--folder',
             help='folder with OBJ files')
     parser.add_argument(
-            '--img',
+            '--npy',
             action='store_true',
-            help='Use --img to export image via matplotlib')
+            help='Use --npy to export voxels as npy data')
     args = parser.parse_args()
 
     os.makedirs('boxCounts', exist_ok=True)
+    folder_name = args.folder.split('/')[-3][0] + args.folder.split('/')[-2]
+    os.makedirs(os.path.join('boxCounts', folder_name), exist_ok=True)
+    os.makedirs(os.path.join('binaries', folder_name), exist_ok=True)
+
     files = [file for file in os.listdir(args.folder) if file.endswith('.obj')]
 
     master_df = pd.DataFrame(columns=['file', 'res', 'L', 'N'])
@@ -308,8 +298,8 @@ if __name__ == '__main__':
         file_path = os.path.join(args.folder, file)
         bbox = get_bbox(file_path)
 
-        for res in np.geomspace(10, bbox/2, 30):
-            L = bbox/res
+        for res in np.geomspace(10, bbox/1.3207, 100):
+            L = bbox/res * 0.3786
             voxels = np.empty([0, 3])
             for x, y, z in voxelize(file_path, res):
                 voxels = np.append(voxels, [[x, y, z]], axis=0)
@@ -318,15 +308,15 @@ if __name__ == '__main__':
                     f'{file:20} | L={L:8.2f} | N={len(voxels):8.0f}')
 
             df.loc[len(df)] = {
-                    'file': file,
+                    'file': file.split('.')[0],
                     'res': res,
-                    'L': bbox/res,
+                    'L': L,
                     'N': len(voxels)}
-            if args.img:
-                save_image(file, voxels, L)
+            if args.npy:
+                save_npy(file, folder_name, voxels, L)
 
         df.to_csv(os.path.join(
-                'boxCounts', f'{file.split(".")[0]}_boxCounts.csv'))
+                'boxCounts', folder_name, f'{file.split(".")[0]}_boxCounts.csv'))
         master_df = master_df.append(df)
 
-    master_df.to_csv('all_boxCounts.csv', index=False)
+    master_df.to_csv(folder_name + '_boxCounts.csv', index=False)
