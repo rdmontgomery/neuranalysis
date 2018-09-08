@@ -319,4 +319,7 @@ if __name__ == '__main__':
                 'boxCounts', folder_name, f'{file.split(".")[0]}_boxCounts.csv'))
         master_df = master_df.append(df)
 
-    master_df.to_csv(folder_name + '_boxCounts.csv', index=False)
+    master_df.to_csv(
+        os.path.join('masters', folder_name + '_boxCounts.csv'),
+        index=False)
+
