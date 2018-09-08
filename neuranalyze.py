@@ -298,8 +298,8 @@ if __name__ == '__main__':
         file_path = os.path.join(args.folder, file)
         bbox = get_bbox(file_path)
 
-        for res in np.geomspace(10, bbox/1.3207, 100):
-            L = bbox/res * 0.3786
+        for res in np.geomspace(3, bbox, 100):
+            L = bbox/res
             voxels = np.empty([0, 3])
             for x, y, z in voxelize(file_path, res):
                 voxels = np.append(voxels, [[x, y, z]], axis=0)
